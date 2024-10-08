@@ -1,0 +1,128 @@
+--------------------------------------------------------
+-----------------------  Variables  --------------------
+--------------------------------------------------------
+
+name: Variables
+########################  Paths to use  ###############################
+
+# Raw data path: where to find the raw data ?
+raw_data_path: "/shared/projects/pacobar/archive/Data_haplotagging_sex_determinism/"
+
+# Pop_map: path to the pop_map directory. This path is required to run the snakemake. It should contain one text file per population to analyse.
+# For each population, the text file should contain the paths to the bam files to run the analysis
+pop_maps: "/shared/scratch/pacobar/bpajot/Wrath_dev/Pop_map/"
+
+# Folder where all the temporary files will be stored
+tmp_path: "/shared/scratch/pacobar/bpajot/tmp/Wrath/"
+
+# Where to save the final output data
+output_path: "/shared/projects/pacobar/finalresult/bpajot/Stage_CIBIO/outputs/Wrath/"
+
+# Where is the reference genome
+Reference_genome: "/shared/projects/pacobar/archive/Data_haplotagging_sex_determinism/Lsax_genome_CLR_HiC_curated_freeze_1_2023_02_17_27ctg.fasta"
+
+########################  Other variables  ###############################
+# Chromosomes
+Chromosomes: ["SUPER_4", "SUPER_13"]
+
+---------------------------------------------------------
+--------------------  Wrath-variables  ------------------
+---------------------------------------------------------
+name: Wrath_variables
+########################  Arguments  ###############################
+# Please add the arguments that are described in wrath in this paragraph
+Required_vars:
+# The genome is given above and is used in the snakemake so it is used somewhere else
+# The names of the chromosomes are given above
+# The window size is given underneath
+# There is no variable group needed with a snakemake
+# The threads are given in the body of the snakefile
+
+# Please leave the argument names. If you need to change their value or remove them, just replace them by their value or null respectively
+Optional_vars:
+  window_size: 50000
+  start: {"SUPER_4": 16100000, "SUPER_13": 30000000}
+  end: {"SUPER_4": 77000000}
+  autodetect: null
+  noplot: null
+  verbose: "--verbose"
+# For the following variables, if you need to use the step variable, please change the step variable to 1 as well as the step name to 1
+# example:
+# step:
+#   makewindows: 1 ...
+  step:
+    makewindows: null
+    getbarcodes: null
+    matrix: null
+    outliers: null
+    plot: null
+
+
+
+
+
+---------------------------------------------------------
+-----------------------  Profile  -----------------------
+---------------------------------------------------------
+name: Profile
+########################  Cluster identification  ###############################
+cluster:
+  mkdir -p /shared/scratch/pacobar/bpajot/Wrath_dev/logs/{rule}/error_files/ &&
+  mkdir -p /shared/scratch/pacobar/bpajot/Wrath_dev/logs/{rule}/logs/ &&
+  sbatch
+    --account=pacobar
+    --partition={resources.partition}
+    --cpus-per-task={threads}
+    --mem={resources.mem_mb}
+    --job-name={rule}-{wildcards}
+    --output=/shared/scratch/pacobar/bpajot/Wrath_dev/logs/{rule}/logs/{rule}-{wildcards}-%j.out
+    --error=/shared/scratch/pacobar/bpajot/Wrath_dev/logs/{rule}/error_files/{rule}-{wildcards}-%j.err
+    --parsable
+
+########################  Resources to use  ###############################
+default-resources:
+ - partition=fast
+ - mem_mb=8000
+ - tmpdir="/shared/scratch/pacobar/bpajot/tmp/Wrath/"
+
+
+########################  Parameters to use for the snakemake  ###############################
+restart-times: 3
+max-jobs-per-second: 10
+max-status-checks-per-second: 1
+local-cores: 1
+latency-wait: 30
+jobs: 40
+keep-going: True
+rerun-incomplete: True
+printshellcmds: True
+use-conda: True
+
+
+
+---------------------------------------------------------
+---------------------  Environments  --------------------
+---------------------------------------------------------
+name: Environments
+########################  Dependencies  ###############################
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - samtools = 1.18
+  - bedtools = 2.30.0
+  - tabix = 1.11
+  - bwa = 0.7.17
+# Python and Python packages
+  - python = 3.12
+  - pysam
+  - numpy
+  - pandas
+  - seaborn
+  - matplotlib
+  - scikit-learn
+# R and R packages
+  - r = 4.3.1
+  - r-tidyverse = 2.0.0
+  - r-nlraa

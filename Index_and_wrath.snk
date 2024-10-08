@@ -1,0 +1,558 @@
+######################## Import custom functions ###############################
+from Scripts_snk.snakemake_functions import *
+from math import log
+from snakemake.io import InputFiles
+import sys, yaml, os
+
+######################## Import values from the configuration file  ###############################
+raw_data_path = config["raw_data_path"]
+Reference_genome = config["Reference_genome"]
+pop_map_path = config["pop_maps"]
+
+working_directory = config["Working_directory"]
+
+tmp_path = config["tmp_path"]
+
+output_path = config["output_path"]
+
+conda_path = f"{working_directory}Configuration_files/envs/"
+
+# Check if the input file exists
+# Check if the input file exists
+if not os.path.isdir(pop_map_path):
+    sys.exit(
+        """
+        No valid Pop_map directory is given. Please create a Pop_map directory containing one text file per population you want to
+        add to the analysis. The text file should contain the names of the samples you want to use, without the file extensions.
+        Several populations may be given in this Pop_map directory.
+        """
+    )
+elif not os.listdir(pop_map_path):
+    sys.exit(
+        """
+        No valid Pop_map directory is given. Please create a Pop_map directory containing one text file per population you want to
+        add to the analysis. The text file should contain the names of the samples you want to use, without the file extensions.
+        Several populations may be given in this Pop_map directory.
+        """
+    )
+
+######################## Get the names of the popmaps  ###############################
+POP_MAP = glob_wildcards(pop_map_path + "{populations}.txt")
+
+######################## Get the sample names  ###############################
+SAMPLES = {}
+EXTENSIONS = {}
+for population in POP_MAP.populations:
+    with open(pop_map_path + population + ".txt", "r") as f:
+        lines = f.read().splitlines()
+        SAMPLES[population] = [x.split("/")[-1].split(".")[0] for x in lines]
+        EXTENSIONS[population] = list(
+            {".".join(x.split("/")[-1].split(".")[1:-1]) for x in lines}
+        )
+    print(f"Population:   {population}\n\tSamples:   {SAMPLES[population]}\n\n\n")
+
+
+######################## Import the wrath argument file  ###############################
+with open(
+    working_directory + "Wrath_variables/Variables_config.yaml",
+    "r",
+) as f:
+    wrath_opts = yaml.load(f, Loader=yaml.SafeLoader)
+Required_wrath_options = wrath_opts["Required_vars"]
+Optional_wrath_options = wrath_opts["Optional_vars"]
+# This makes the variables accessible directly in the snakefile as usable variables
+globals().update(Optional_wrath_options)
+
+if not any(step.values()):
+    Step = None
+
+if window_size is None:
+    window_size = str(50000)
+else:
+    window_size = str(window_size)
+
+###################################### Global variables  ######################################
+######################## Reference genome  ###############################
+# The reference genome is located somewhere in the cluster. We will copy it in our output_path
+# folder where we can access it and index it if it is not yet done. Therefore, the location of
+# the reference gemome is :
+genome = output_path + "Reference/" + Reference_genome.split("/")[-1]
+######################## Other variables  ###############################
+CHROMOSOMES = config["Chromosomes"]
+
+for chromosome in CHROMOSOMES:
+    if start is None:
+        start = {}
+        start[chromosome] = str(1)
+    else:
+        if chromosome not in start.keys():
+            start[chromosome] = str(1)
+        else:
+            start[chromosome] = str(start[chromosome])
+
+    if end is None:
+        end = {}
+        with open(genome + ".fai", "r") as f:
+            end[chromosome] = [
+                line.split("\t")[1] for line in f.readlines() if chromosome in line
+            ][0]
+    else:
+        if chromosome not in end.keys():
+            with open(genome + ".fai", "r") as f:
+                end[chromosome] = [
+                    line.split("\t")[1] for line in f.readlines() if chromosome in line
+                ][0]
+        else:
+            end[chromosome] = str(end[chromosome])
+
+print(f"Chromosome start points: {start}")
+print(f"Chromosome end points: {end}")
+
+
+###################################### Input functions  ######################################
+def input_beds_windows(POP_MAP, CHROMOSOMES, start, end):
+    return flatten(
+        [
+            expand(
+                output_path
+                + "beds/windows_"
+                + window_size
+                + "_{chromosome}.{start}-{end}.bed",
+                population=POP_MAP.populations,
+                chromosome=chromosome,
+                start=start[chromosome],
+                end=end[chromosome],
+            )
+            for chromosome in CHROMOSOMES
+        ]
+    )
+
+
+def input_beds_barcodes(POP_MAP, CHROMOSOMES, start, end):
+    return flatten(
+        [
+            expand(
+                output_path
+                + "{population}/beds/barcodes_{chromosome}.{start}-{end}.sorted.{ext}",
+                population=POP_MAP.populations,
+                chromosome=chromosome,
+                start=start[chromosome],
+                end=end[chromosome],
+                ext=["bed.gz", "bed.gz.tbi"],
+            )
+            for chromosome in CHROMOSOMES
+        ]
+    )
+
+
+def input_matrices(POP_MAP, CHROMOSOMES, start, end):
+    return flatten(
+        [
+            expand(
+                output_path
+                + "{population}/matrices/jaccard_matrix_"
+                + window_size
+                + "_{chromosome}.{start}-{end}.txt",
+                population=POP_MAP.populations,
+                chromosome=chromosome,
+                start=start[chromosome],
+                end=end[chromosome],
+            )
+            for chromosome in CHROMOSOMES
+        ]
+    )
+
+
+def input_plots(POP_MAP, CHROMOSOMES, start, end):
+    return flatten(
+        [
+            expand(
+                output_path
+                + "{population}/plots/heatmap_"
+                + window_size
+                + "_{chromosome}.{start}-{end}.png",
+                population=POP_MAP.populations,
+                chromosome=chromosome,
+                start=start[chromosome],
+                end=end[chromosome],
+            )
+            for chromosome in CHROMOSOMES
+        ]
+    )
+
+
+def get_bam_inputs_n05(wildcards):
+    return (
+        raw_data_path
+        + wildcards.sample
+        + "."
+        + EXTENSIONS[wildcards.population][0]
+        + ".bam"
+    )
+
+
+###################################### Memory allocation functions  ######################################
+######################## Double memory  ###############################
+def double_mem(attempt):
+    return 2 ** (attempt - 1)
+
+
+def get_mem_n10(wildcards, attempt):
+    return 32000 * double_mem(attempt)
+
+
+######################## RULES  ###############################
+######################## rule all  ###############################
+rule all:
+    input:
+        expand(
+            raw_data_path + "{sample}.{extension}.bam.bai",
+            sample=[
+                sample
+                for population in SAMPLES.keys()
+                for sample in SAMPLES[population]
+            ],
+            extension=[
+                extension
+                for population in EXTENSIONS.keys()
+                for extension in EXTENSIONS[population]
+            ],
+        ),
+        output_path + "size.genome",
+        input_beds_windows(POP_MAP, CHROMOSOMES, start, end),
+        input_beds_barcodes(POP_MAP, CHROMOSOMES, start, end),
+        input_matrices(POP_MAP, CHROMOSOMES, start, end),
+        input_plots(POP_MAP, CHROMOSOMES, start, end),
+
+
+#########################  Index the bam/cram files  ###############################
+rule N01_Index_bam:
+    input:
+        raw_data_path + "{sample}.{extension}.bam",
+    output:
+        raw_data_path + "{sample}.{extension}.bam.bai",
+    threads: 1
+    conda:
+        conda_path + "N01_Index_bam.yaml"
+    message:
+        "Indexing {wildcards.sample}"
+    shell:
+        """
+            samtools index -@ {threads} -b {input:q} > {output:q}
+        """
+
+
+#########################  Make genomic windows  ###############################
+if Step is None or step["makewindows"] is not None:
+
+    rule N02_Chrom_sizes_all_genome:
+        input:
+            genome + ".fai",
+        output:
+            output_path + "size.genome",
+        message:
+            "Getting chromosome sizes"
+        shell:
+            """
+                cut -f1,2 {input:q} > {output:q}
+            """
+
+    rule N03_Chrom_sizes:
+        input:
+            rules.N02_Chrom_sizes_all_genome.output,
+        output:
+            temp(tmp_path + "size.{chromosome}"),
+        params:
+            chromosome=expand(CHROMOSOMES),
+        message:
+            "Getting {wildcards.chromosome} size from genome file"
+        shell:
+            """
+                awk -v pat="{wildcards.chromosome}" '$1 == pat {{print $0}}' {input:q} > {output:q}
+            """
+
+    rule N04_Make_windows:
+        input:
+            rules.N03_Chrom_sizes.output,
+        output:
+            out=output_path
+            + "beds/windows_"
+            + window_size
+            + "_{chromosome}.{start}-{end}.bed",
+            temp_out=temp(
+                tmp_path
+                + "beds/windows_"
+                + window_size
+                + "_{chromosome}.{start}-{end}.bed"
+            ),
+        params:
+            window_size=window_size,
+        conda:
+            conda_path + "N04_Make_windows.yaml"
+        message:
+            "Making windows of {wildcards.chromosome:q} from {wildcards.start} to {wildcards.end:q}"
+        shell:
+            """
+                bedtools makewindows -g {input:q} -w {params.window_size:q} > {output.temp_out:q}
+                awk -v a={wildcards.start} -v b={wildcards.end:q} '$2>a && $3<b {{print $0}}' {output.temp_out:q} > {output.out:q}
+            """
+
+    step["getbarcodes"] = 1
+
+
+#########################  Get barcodes  ###############################
+if Step is None or step["getbarcodes"] is not None:
+
+    rule N05_Get_barcodes:
+        input:
+            rules.N04_Make_windows.output.out,
+            bam=get_bam_inputs_n05,
+        output:
+            temp(
+                tmp_path
+                + "{population}/beds/barcodes_"
+                + window_size
+                + "_{chromosome}.{start}-{end}.{sample}.bed"
+            ),
+        threads: 15
+        conda:
+            conda_path + "N05_Get_barcodes.yaml"
+        message:
+            "Getting {wildcards.sample} barcodes from {wildcards.chromosome} in {wildcards.population}"
+        shell:
+            r"""
+                samtools view -q 20 -@ {threads} {input.bam:q} {wildcards.chromosome}:{wildcards.start}-{wildcards.end} | grep -o -P "{wildcards.chromosome}.*BX:Z:[^\t\n]*" | awk '{{print $1"\t"$2"\t"$2"\t"$NF}}' > {output:q}
+            """
+
+    rule N06_Sort_barcodes:
+        input:
+            lambda wildcards: expand(
+                rules.N05_Get_barcodes.output,
+                sample=SAMPLES[wildcards.population],
+                allow_missing=True,
+            ),
+        output:
+            temp(
+                tmp_path
+                + "{population}/beds/barcodes_{chromosome}.{start}-{end}.sorted.bed"
+            ),
+        threads: 15
+        resources:
+            mem_mb=9000,
+        message:
+            "Sorting of barcodes bed files for {wildcards.chromosome} for {wildcards.population}"
+        shell:
+            """
+                cat {input:q} > {output:q}
+            """
+
+    rule N07_Zip:
+        input:
+            rules.N06_Sort_barcodes.output,
+        output:
+            output_path
+            + "{population}/beds/barcodes_{chromosome}.{start}-{end}.sorted.bed.gz",
+        resources:
+            mem_mb=200000,
+        conda:
+            conda_path + "N07_Zip.yaml"
+        shell:
+            """
+                bedtools sort -i {input:q} | bgzip -@ {threads} > {output:q}
+            """
+
+    rule N08_Tabix:
+        input:
+            rules.N07_Zip.output,
+        output:
+            output_path
+            + "{population}/beds/barcodes_{chromosome}.{start}-{end}.sorted.bed.gz.tbi",
+        conda:
+            conda_path + "N08_Tabix.yaml"
+        message:
+            "Making TabFile for {wildcards.chromosome} in {wildcards.population}"
+        shell:
+            """
+                tabix {input:q}
+            """
+
+    step["matrix"] = 1
+
+
+#########################  Generate similarity matrix  ###############################
+if Step is None or step["matrix"] is not None:
+
+    rule N09_Jaccard_matrix:
+        input:
+            index=rules.N08_Tabix.output,
+            bed_file=rules.N07_Zip.output,
+            window_size_file=rules.N04_Make_windows.output.out,
+        output:
+            temp(
+                tmp_path
+                + "{population}/matrices/jaccard_matrix_"
+                + window_size
+                + "_{chromosome}.{start}-{end}.0.txt"
+            ),
+        message:
+            (
+                "Computing jaccard matrix for {wildcards.chromosome} with window size "
+                + window_size
+                + " on {wildcards.population}"
+            )
+        params:
+            working_directory=working_directory,
+            verbose=Optional_wrath_options["verbose"],
+            out_dir=tmp_path + "{population}/matrices/",
+        threads: 30
+        resources:
+            partition="long",
+            mem_mb=50000,
+        conda:
+            conda_path + "N09_Jaccard_matrix.yaml"
+        shell:
+            """
+                mkdir -p {params.out_dir:q}
+                python {params.working_directory:q}Scripts_snk/sv_detection/jaccard_matrix_simplequeue.py --threads {threads} -w {input.window_size_file:q} -b {input.bed_file:q} -o {output:q} {params.verbose:q}
+            """
+
+    rule N10_Eddit_Jaccard_matrix:
+        input:
+            rules.N09_Jaccard_matrix.output,
+        output:
+            output_path
+            + "{population}/matrices/jaccard_matrix_"
+            + window_size
+            + "_{chromosome}.{start}-{end}.txt",
+        message:
+            "Editting of jaccard index matrix for {wildcards.chromosome} in {wildcards.population}"
+        shell:
+            """
+                sed "s/,$//" {input:q} > {output:q}
+            """
+
+    step["plot"], step["outliersStep"] = 1, 1
+
+
+#########################  Plot results without automatic detection of SVs  ###############################
+if step["plot"] is not None and autodetect is None and noplot is None:
+
+    rule N11_Plot_without_autodetect:
+        input:
+            matrix_file=rules.N10_Eddit_Jaccard_matrix.output,
+            window_file=output_path
+            + "beds/windows_"
+            + window_size
+            + "_{chromosome}.{start}-{end}.bed",
+        output:
+            output_path
+            + "{population}/plots/heatmap_"
+            + window_size
+            + "_{chromosome}.{start}-{end}.png",
+        message:
+            "Plotting of matrix for {wildcards.chromosome} in {wildcards.population}"
+        params:
+            out_dir=output_path + "{population}/plots/",
+            working_directory=working_directory,
+        conda:
+            conda_path + "N11_Plot_without_autodetect.yaml"
+        shell:
+            """
+                mkdir -p {params.out_dir}
+                python {params.working_directory}Scripts_snk/sv_detection/plot_heatmap.py --matrix {input.matrix_file:q} -w {input.window_file:q} -o {output:q}
+            """
+
+
+#########################  Detect outliers  ###############################
+elif None not in (step["outliersStep"], autodetect):
+
+    rule N11_Detecting_outliers:
+        input:
+            rules.N10_Eddit_Jaccard_matrix.output,
+        output:
+            output_path
+            + "{population}/outliers/outliers_"
+            + window_size
+            + "_{chromosome}.{start}.{end}.csv",
+        params:
+            out_dir=output_path + "{population}/outliers/",
+            working_directory=working_directory,
+            out_prefix=output_path
+            + "{population}/outliers/outliers_"
+            + window_size
+            + "_{chromosome}.{start}.{end}",
+        message:
+            "Detecting outliers for {wildcards.chromosome} in {wildcards.population}"
+        resources:
+            mem_mb=get_mem_n10,
+            partition="long",
+        conda:
+            conda_path + "N11_Detecting_outliers.yaml"
+        shell:
+            """
+                mkdir -p {params.out_dir:q}
+                Rscript {params.working_directory}Scripts_snk/sv_detection/outlier_detection.R {input:q} {params.out_prefix:q}
+            """
+
+
+#########################  Detect SVs and plot results  ###############################
+if None not in (step["outliersStep"], autodetect) and noplot is None:
+
+    rule N12_Detect_and_plot_SVs:
+        input:
+            matrix_file=rules.N10_Eddit_Jaccard_matrix.output,
+            window_file=output_path
+            + "beds/windows_"
+            + window_size
+            + "_{chromosome}.{start}-{end}.bed",
+            outlier_file=rules.N11_Detecting_outliers.output,
+        output:
+            plot=output_path
+            + "{population}/plots/heatmap_"
+            + window_size
+            + "_{chromosome}.{start}-{end}.png",
+            sv_file=output_path
+            + "{population}/SVs/sv_"
+            + window_size
+            + "_{chromosome}.{start}-{end}.txt",
+        message:
+            "Detecting and plotting SVs in {wildcards.population}"
+        params:
+            out_dir_plot=output_path + "{population}/plots/",
+            out_dir_svs=output_path + "{population}/SVs/",
+            window_size=window_size,
+            working_directory=working_directory,
+        conda:
+            conda_path + "N12_Detect_and_plot_SVs.yaml"
+        shell:
+            """
+                mkdir -p {params.out_dir_plot:q} {params.out_dir_svs:q}
+                python {params.working_directory:q}Scripts_snk/sv_detection/sv_detection_and_heatmap.py --matrix {input.matrix_file:q} -w {input.window_file:q} -o {input.outlier_file:q} -p {output.plot:q} -s {output.sv_file:q} -f {params.window_size:q} -c {wildcards.chromosome}
+            """
+
+
+#########################  Detect SVs without plot results  ###############################
+elif noplot is None and autodetect is not None and step["outliersStep"] is not None:
+
+    rule N11_Detect_SVs_without_plot:
+        input:
+            matrix_file=rules.N10_Eddit_Jaccard_matrix.output,
+            outlier_file=rules.N11_Detecting_outliers.output,
+        output:
+            output_path
+            + "{population}/SVs/sv_"
+            + window_size
+            + "_{chromosome}.{start}-{end}.txt",
+        params:
+            window_size=window_size,
+            out_dir=output_path + "{population}/SVs/",
+            working_directory=working_directory,
+        message:
+            "Detecting SVs in {wildcards.chromosome} without plots in {wildcards.population}"
+        conda:
+            conda_path + "N11_Detect_SVs_without_plot.yaml"
+        shell:
+            """
+                mkdir -p {params.out_dir:q}
+                python {params.working_directory:q}Scripts_snk/sv_detection/sv_detection.py --matrix {input.matrix_file:q} -o {input.outlier_file:q} -w {params.window_size:q} -s {output:q}
+            """

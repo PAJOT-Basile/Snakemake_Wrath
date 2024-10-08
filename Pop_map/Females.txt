@@ -1,0 +1,6 @@
+/shared/projects/pacobar/archive/Data_haplotagging_sex_determinism/250_final_UK-high_S2_R1_001.cutadapt_outdir.SUPER_4_13_Markedup.BXnum.bam
+/shared/projects/pacobar/archive/Data_haplotagging_sex_determinism/296_final_UK-high_S2_R1_001.cutadapt_outdir.SUPER_4_13_Markedup.BXnum.bam
+/shared/projects/pacobar/archive/Data_haplotagging_sex_determinism/330_final_UK-high_S2_R1_001.cutadapt_outdir.SUPER_4_13_Markedup.BXnum.bam
+/shared/projects/pacobar/archive/Data_haplotagging_sex_determinism/339_final_UK-high_S2_R1_001.cutadapt_outdir.SUPER_4_13_Markedup.BXnum.bam
+/shared/projects/pacobar/archive/Data_haplotagging_sex_determinism/345_final_UK-high_S2_R1_001.cutadapt_outdir.SUPER_4_13_Markedup.BXnum.bam
+/shared/projects/pacobar/archive/Data_haplotagging_sex_determinism/375_final_UK-high_S2_R1_001.cutadapt_outdir.SUPER_4_13_Markedup.BXnum.bam
