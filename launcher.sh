@@ -73,4 +73,6 @@ export TMPDIR TMP TEMP
 
 echo "Starting Snakemake execution"
 # Run the snakemake file
+module load snakemake/7.25.0
 snakemake -s "${HERE}/${SNAKEFILE}" --profile "${HERE}/Cluster_profile/slurm" --configfile "${HERE}/Configuration_files/Variables_config.yaml"
+module load snakemake/7.25.0
